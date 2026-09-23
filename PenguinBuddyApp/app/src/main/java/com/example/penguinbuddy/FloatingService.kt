@@ -32,7 +32,7 @@ class FloatingService : Service() {
     private var role = "blue"
     private var activeState = "none"
     private val client = OkHttpClient()
-    private val serverUrl = "http://10.0.2.2:5000"
+    private val serverUrl = "https://kvdb.io/44FNGEYy2QA8MqFD7Y6PAc/state"
     
     private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
     
