@@ -83,7 +83,7 @@ class FloatingService : Service() {
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY 
             else 
                 WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         )
 
