@@ -88,8 +88,11 @@ class FloatingService : Service() {
         )
 
         params.gravity = Gravity.TOP or Gravity.LEFT
-        params.x = if (role == "blue") 100 else screenWidth - 400
+        params.x = if (role == "blue") -150 else screenWidth - 220
         params.y = 500
+
+        // Add the tilt
+        container.rotation = if (role == "blue") 10f else -10f
 
         windowManager.addView(container, params)
         applyIdleState()
@@ -114,14 +117,15 @@ class FloatingService : Service() {
                     MotionEvent.ACTION_UP -> {
                         val diffX = Math.abs(event.rawX - initialTouchX)
                         val diffY = Math.abs(event.rawY - initialTouchY)
-                        if (diffX < 10 && diffY < 10) {
+                        if (diffX < 50 && diffY < 50) { // Increased touch slop
                             val clickTime = System.currentTimeMillis()
-                            if (clickTime - lastClickTime < 300) {
+                            if (clickTime - lastClickTime < 500) { // Increased double tap timeout
                                 onDoubleTap()
+                                lastClickTime = 0L // Reset to prevent triple tap counting as two double taps
                             } else {
                                 onSingleTap()
+                                lastClickTime = clickTime
                             }
-                            lastClickTime = clickTime
                         }
                         return true
                     }
@@ -251,7 +255,7 @@ class FloatingService : Service() {
         serviceScope.launch {
             delay(2000)
             // Turn into ghost and teleport back
-            params.x = if (role == "blue") 100 else screenWidth - 400
+            params.x = if (role == "blue") -150 else screenWidth - 220
             windowManager.updateViewLayout(container, params)
             spriteView.setSprite(ghostRes, true, 150L, 2.5f)
             isAnimating = false
@@ -264,7 +268,7 @@ class FloatingService : Service() {
         
         // Walk back on screen
         val startX = if (role == "red") -400 else screenWidth + 400
-        val destX = if (role == "blue") 100 else screenWidth - 400
+        val destX = if (role == "blue") -150 else screenWidth - 220
         val faceLeft = role == "blue" // Coming back from opposite dir
         
         params.x = startX
