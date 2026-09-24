@@ -137,6 +137,7 @@ class FloatingService : Service() {
         })
         
         visitorSprite.setOnClickListener {
+            if (isAnimating) return@setOnClickListener
             onSingleTap()
         }
     }
@@ -178,6 +179,7 @@ class FloatingService : Service() {
     }
     
     private fun pushState(state: String) {
+        if (state == activeState) return // Prevent spamming duplicate states
         lastPushTime = System.currentTimeMillis()
         handleStateChange(state)
         serviceScope.launch(Dispatchers.IO) {
@@ -210,6 +212,7 @@ class FloatingService : Service() {
 
     private fun handleStateChange(newState: String) {
         val oldState = activeState
+        if (oldState == newState) return // Extra guard against multiple triggers
         activeState = newState
         val other = if (role == "blue") "red" else "blue"
 
@@ -317,7 +320,7 @@ class FloatingService : Service() {
         visitorSprite.setSprite(walkRes, true, 100L, 2.5f)
         visitorSprite.setFacingLeft(faceLeft)
         
-        val destX = params.x + if (role == "blue") 120 else -120
+        val destX = params.x + if (role == "blue") 250 else -250
         val anim = ValueAnimator.ofInt(startX, destX)
         anim.addUpdateListener {
             vp.x = it.animatedValue as Int
