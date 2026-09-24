@@ -20,7 +20,6 @@ import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
-import java.io.IOException
 
 class FloatingService : Service() {
     private lateinit var windowManager: WindowManager
@@ -40,6 +39,8 @@ class FloatingService : Service() {
     
     private var screenWidth = 0
     private var isAnimating = false
+    private var lastPushTime = 0L
+    private var ghostBobAnimator: ObjectAnimator? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -62,7 +63,7 @@ class FloatingService : Service() {
         
         spriteView = SpriteView(this).apply {
             val lp = FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT)
-            lp.topMargin = 120 // Permanent invisible padding for the notification symbol!
+            lp.topMargin = 120 
             layoutParams = lp
         }
         notifView = TextView(this).apply {
@@ -88,12 +89,6 @@ class FloatingService : Service() {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         )
-
-        params.gravity = Gravity.TOP or Gravity.LEFT
-        params.x = if (role == "blue") -150 else screenWidth - 220
-        params.y = 500
-
-        container.rotation = if (role == "blue") 10f else -10f
 
         windowManager.addView(container, params)
         applyIdleState()
@@ -142,11 +137,20 @@ class FloatingService : Service() {
         })
         
         visitorSprite.setOnClickListener {
-            onVisitorTap()
+            onSingleTap()
         }
     }
     
     private fun applyIdleState() {
+        params.gravity = Gravity.TOP or Gravity.LEFT
+        params.x = if (role == "blue") -150 else screenWidth - 220
+        params.y = 500
+        container.rotation = if (role == "blue") 10f else -10f
+        windowManager.updateViewLayout(container, params)
+        
+        spriteView.translationY = 0f
+        ghostBobAnimator?.cancel()
+        
         val res = if (role == "blue") R.drawable.blue_idle else R.drawable.red_idle
         val faceLeft = role == "red"
         spriteView.setSprite(res, false, scale = 2.5f)
@@ -162,7 +166,7 @@ class FloatingService : Service() {
                     val json = JSONObject(response.body?.string() ?: "{}")
                     val newState = json.optString("activeState", "none")
                     
-                    if (newState != activeState) {
+                    if (newState != activeState && System.currentTimeMillis() - lastPushTime > 2000) {
                         withContext(Dispatchers.Main) {
                             handleStateChange(newState)
                         }
@@ -174,6 +178,8 @@ class FloatingService : Service() {
     }
     
     private fun pushState(state: String) {
+        lastPushTime = System.currentTimeMillis()
+        handleStateChange(state)
         serviceScope.launch(Dispatchers.IO) {
             try {
                 val json = JSONObject().put("activeState", state).toString()
@@ -195,11 +201,9 @@ class FloatingService : Service() {
         if (activeState == "waiting_$other") {
             notifView.visibility = View.GONE
             pushState("visiting_$other")
-        }
-    }
-    
-    private fun onVisitorTap() {
-        if (activeState == "visiting_$role") { 
+        } else if (activeState == "visiting_$role") {
+            pushState("hugging_$role")
+        } else if (activeState == "hugging_$role") {
             pushState("none")
         }
     }
@@ -215,12 +219,14 @@ class FloatingService : Service() {
         } else if (newState == "waiting_$other") {
             notifView.visibility = View.VISIBLE
         } else if (newState == "visiting_$role") {
-            playHostReceiveHugSequence(other)
+            playHostReceiveVisitorSequence(other)
         } else if (newState == "visiting_$other") {
             playVisitorLeaveSequence(other)
-        } else if (newState == "none" && oldState == "visiting_$other") {
+        } else if (newState == "hugging_$role") {
+            playHostHugSequence()
+        } else if (newState == "none" && (oldState == "visiting_$other" || oldState == "hugging_$other")) {
             playVisitorReturnSequence()
-        } else if (newState == "none" && oldState == "visiting_$role") {
+        } else if (newState == "none" && (oldState == "visiting_$role" || oldState == "hugging_$role")) {
             playHostEndHugSequence()
         } else if (newState == "none") {
             applyIdleState()
@@ -247,15 +253,25 @@ class FloatingService : Service() {
         
         serviceScope.launch {
             delay(2000)
-            params.x = if (role == "blue") -150 else screenWidth - 220
+            params.x = if (role == "blue") 150 else screenWidth - 350
+            container.rotation = 0f
             windowManager.updateViewLayout(container, params)
             spriteView.setSprite(ghostRes, true, 150L, 2.5f)
+            
+            ghostBobAnimator = ObjectAnimator.ofFloat(spriteView, "translationY", 0f, -30f, 0f)
+            ghostBobAnimator?.duration = 2000
+            ghostBobAnimator?.repeatCount = ValueAnimator.INFINITE
+            ghostBobAnimator?.start()
+            
             isAnimating = false
         }
     }
     
     private fun playVisitorReturnSequence() {
         isAnimating = true
+        ghostBobAnimator?.cancel()
+        spriteView.translationY = 0f
+        
         val walkRes = if (role == "blue") R.drawable.blue_walk else R.drawable.red_walk
         
         val startX = if (role == "red") -400 else screenWidth + 400
@@ -263,6 +279,7 @@ class FloatingService : Service() {
         val faceLeft = role == "blue" 
         
         params.x = startX
+        container.rotation = if (role == "blue") 10f else -10f
         windowManager.updateViewLayout(container, params)
         
         spriteView.setSprite(walkRes, true, 100L, 2.5f)
@@ -279,10 +296,9 @@ class FloatingService : Service() {
         }
     }
     
-    private fun playHostReceiveHugSequence(visitorRole: String) {
+    private fun playHostReceiveVisitorSequence(visitorRole: String) {
         isAnimating = true
         val walkRes = if (visitorRole == "blue") R.drawable.blue_walk else R.drawable.red_walk
-        val hugRes = if (role == "blue") R.drawable.blue_newhug else R.drawable.red_newhug 
         
         visitorParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
@@ -295,7 +311,7 @@ class FloatingService : Service() {
         val startX = if (role == "blue") screenWidth + 200 else -400
         vp.x = startX
         vp.y = params.y
-        windowManager.addView(visitorSprite, vp)
+        if (visitorSprite.parent == null) windowManager.addView(visitorSprite, vp)
         
         val faceLeft = role == "blue"
         visitorSprite.setSprite(walkRes, true, 100L, 2.5f)
@@ -312,14 +328,25 @@ class FloatingService : Service() {
         
         serviceScope.launch {
             delay(2000)
-            spriteView.visibility = View.INVISIBLE 
-            visitorSprite.setSprite(hugRes, false, scale = 3.5f)
-            vp.x = params.x + if (role == "blue") -50 else -20
-            vp.y = params.y - 120
-            visitorSprite.setFacingLeft(role == "red")
-            if (visitorSprite.parent != null) windowManager.updateViewLayout(visitorSprite, vp)
+            visitorSprite.setSprite(if (visitorRole == "blue") R.drawable.blue_idle else R.drawable.red_idle, false, scale = 2.5f)
             isAnimating = false
         }
+    }
+    
+    private fun playHostHugSequence() {
+        isAnimating = true
+        val hugRes = if (role == "blue") R.drawable.blue_newhug else R.drawable.red_newhug 
+        
+        spriteView.visibility = View.INVISIBLE 
+        visitorSprite.setSprite(hugRes, false, scale = 3.5f)
+        
+        val vp = visitorParams!!
+        vp.x = params.x + if (role == "blue") -50 else -20
+        vp.y = params.y - 120
+        visitorSprite.setFacingLeft(role == "red")
+        if (visitorSprite.parent != null) windowManager.updateViewLayout(visitorSprite, vp)
+        
+        isAnimating = false
     }
     
     private fun playHostEndHugSequence() {
